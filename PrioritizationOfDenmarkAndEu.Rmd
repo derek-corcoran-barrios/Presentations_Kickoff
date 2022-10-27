@@ -23,11 +23,97 @@ library(kableExtra)
 options("kableExtra.html.bsTable" = T)
 FirstTable <- read_excel("O:/Nat_Sustain-proj/_user/derekCorcoran_au687614/CRW_Nordic_Species/Nordic_CWR_list_Fitzgerald.xlsx")
 ```
+
 # Species distirbution models
 
+## Species distribution models
 
+* Modeling more than 40,000 Species of Denmark
+* Goal to model them at 10 meter resolution including
+  + Climatic data (Chelsa Downscaling algorithm)
+  + Soil data (Soilgrids for EU)
+  + Landuse (Either corine or google earth dynamic world)
+* Projections for present and at least 4 future scenarios
 
-## Species distirbution models
+## Presence cleaning
+
+* Passed it through the **taxize** r package to get the GBIF closest match and exclude synonimia
+* Filtered out species with lower than 0.9 in a match
+* Used **rgbif** package to download presences
+* Max 10.000 species that had coordinates
+
+## Filtering of presences
+
+With **CoordinateCleaner** r package:
+
+* Presences from 1960 onwards
+* Eliminated prescences in Country, county or regions centroids (Known way to create coordinates of occurrences where there are no known coordinates)
+* Eliminated equal lat and long
+* Eliminated environmental and geografical outliers
+
+With **spThin** 
+
+* Made sure that presences are at least 5 kms form each other (Spatial Autocorrelation)
+
+## Example
+
+```{r, cache = T}
+Files <- list.files(path = "O:/Nat_Sustain-proj/_user/derekCorcoran_au687614/CRW_Nordic_Species/Occs/", full.names = T)
+
+FinalFiles <- list.files(path = "O:/Nat_Sustain-proj/_user/derekCorcoran_au687614/CRW_Nordic_Species/Final_Ocurrences/", full.names = T)
+
+Presences <- Files[1:10] %>% 
+  purrr::map(readRDS) %>% 
+  purrr::map(~.x$data) %>% 
+  purrr::map(~dplyr::select(.x, "scientificName", "decimalLatitude", "decimalLongitude"))
+
+PresenceFinal <- FinalFiles[7] %>% 
+  readRDS()
+
+saveRDS(Presences, "ForLeaflet.rds")
+```
+
+For **Avena fatua** reduction from `r nrow(Presences[[7]])` to `r nrow(PresenceFinal)`
+
+```{r}
+Presences <- readRDS("ForLeaflet.rds")
+
+l <- leaflet() %>% 
+  addMapPane("left", zIndex = 0) %>%
+  addMapPane("right", zIndex = 0) %>%
+  addTiles(group = "base", layerId = "baseid",
+           options = pathOptions(pane = "left")) %>% 
+  addTiles(group = "base", layerId = "baseid2",
+           options = pathOptions(pane = "right"))
+
+Names <- list.files(path = "O:/Nat_Sustain-proj/_user/derekCorcoran_au687614/CRW_Nordic_Species/Projection_PresentBIN/") 
+
+Names <- Names[stringr::str_detect(Names, "aux.", negate = T)] |>
+  str_remove_all("\\.tif")
+
+l <- l %>% addCircleMarkers(data = Presences[[7]], lat = ~decimalLatitude, lng =  ~decimalLongitude, group = Names[7], color = "red", options = pathOptions(pane = "left")) %>% 
+  addCircleMarkers(data = PresenceFinal, lat = ~Latitude, lng =  ~Longitude, group = Names[7], color = "red", options = pathOptions(pane = "right")) %>%   addLayersControl(overlayGroups = c("blue","red", "yellow")) %>%
+  addSidebyside(layerId = "sidecontrols",
+                rightId = "baseid2",
+                leftId = "baseid")
+
+l
+
+#l %>% addLayersControl(
+#    baseGroups = Names[7],
+#    options = layersControlOptions(collapsed = F)
+#  )
+```
+
+## Methods
+
+* Using AMPL written  and tested models to prioritize:
+  + Denmark or EU as a whole, by region, or by commune
+  + Maximize shannon divesity (or other alpha div)
+  + Select possible landuse changes
+  + Minimum Carbon storage 
+  + Goals for red list species
+  + Consider cities, landuse change, and climate change
 
 ## Methods
 
@@ -62,11 +148,43 @@ All <- list.files("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Pr
 
 Consensus <- "O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Concensus/Taraxacum_interveniens.tif"
 
-All <- c(PresentCons, All, Consensus) %>% purrr::map(raster::raster) %>% 
-  purrr::reduce(stack)
+All <- c(PresentCons, All, Consensus) %>% purrr::map(terra::rast) %>% 
+  purrr::reduce(c)
 
 names(All) <- c("Present","GFDLESM2M", "HGEA", "inm4", "IPCL", "Concensus")
-plot(All, colNA = "black")
+
+cls <- data.frame(id=0:1, 
+                  Present=c("Absent", "Present"))
+
+levels(All[[1]]) <- cls
+
+cls <- data.frame(id=0:1, GFDLESM2M=c("Absent", "Present"))
+
+levels(All[[2]]) <- cls
+
+cls <- data.frame(id=0:1, HGEA=c("Absent", "Present"))
+
+levels(All[[3]]) <- cls
+
+cls <- data.frame(id=0:1, inm4=c("Absent", "Present"))
+
+levels(All[[4]]) <- cls
+
+cls <- data.frame(id=0:1, IPCL=c("Absent", "Present"))
+
+levels(All[[5]]) <- cls
+
+cls <- data.frame(id=0:1, Concensus =c("Absent", "Present"))
+
+levels(All[[6]]) <- cls
+
+#plot(All, colNA = "black")
+
+ggplot() + 
+   geom_spatraster(data = All) +
+  facet_wrap(~lyr) +
+  theme_bw() +
+  scale_fill_viridis_d(na.translate = F)
 
 ```
 
@@ -74,24 +192,38 @@ plot(All, colNA = "black")
 
 ```{r cons, cache=T}
 
-DF <- readRDS("Natives.rds") %>% 
-  dplyr::filter(!is.na(Area_Present), !is.na(Area_Consenus), Area_Consenus > 0)
+#DF <- readRDS("Natives.rds") %>% 
+#  dplyr::filter(!is.na(Area_Present), !is.na(Area_Consenus), Area_Consenus > 0)
 
-Links <- paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/", DF$Concensus)
+#Links <- paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/", DF$Concensus)
 
-Richness <- Links %>% 
-  purrr::map(terra::rast) %>% 
-  purrr::reduce(`+`)
+#Richness <- Links %>% 
+#  purrr::map(terra::rast) %>% 
+#  purrr::reduce(`+`)
 
-terra::writeRaster(Richness, "ConcensusRichness.tif", overwrite = T)
+#terra::writeRaster(Richness, "ConcensusRichness.tif", overwrite = T)
 ```
 
 ```{r}
-Richness <- raster::raster("CurrentRichness.tif")
-ConcensuRichness <- raster::raster("ConcensusRichness.tif")
-Both <- raster::stack(Richness, ConcensuRichness)
-names(Both) <- c("Present", "Concensus")
-plot(Both, colNA = "black")
+Richness <- terra::rast("CurrentRichness.tif")
+ConcensuRichness <- terra::rast("ConcensusRichness.tif")
+#Both <- c(Richness, ConcensuRichness)
+#names(Both) <- c("Present", "Concensus")
+#plot(Both, colNA = "black")
+library(patchwork)
+
+p1 <- ggplot() + 
+   geom_spatraster(data = Richness) +
+  theme_bw() +
+   scale_fill_hypso_c() + 
+  ggtitle('Present')
+p2 <- ggplot() + 
+   geom_spatraster(data = ConcensuRichness) +
+  theme_bw() +
+   scale_fill_hypso_c() +
+  ggtitle('Consensus')
+p1 + p2
+
 ```
 
 * Present richness vs concensus richness
@@ -107,25 +239,31 @@ plot(Both, colNA = "black")
 * Does not consider climate change (We can do better)
 
 ```{r}
-Naidoo <- raster::raster("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Naidoo.tif")
-plot(Naidoo, colNA = "black")
+Naidoo <- terra::rast("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Naidoo.tif")
+N <- ggplot() + 
+   geom_spatraster(data = Naidoo) +
+  theme_bw() +
+   scale_fill_hypso_c()+ ggtitle("Agriculture") +theme(legend.position = "bottom")
+N
 ```
 
 ## Human footprint
 
 ```{r HFP, cache = T}
-HFP <- raster::raster("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/HumanFootprint/HumanFootPrintDKN.tif") %>% 
-  raster::projectRaster(crs = "+proj=aea +lat_0=49.0601837 +lon_0=17.7539063 +lat_1=37.0553505 +lat_2=61.0650168 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs") %>% 
-  resample(Naidoo)
+HFP <- terra::rast("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/HumanFootprint/HumanFootPrintDKN.tif") %>% 
+  terra::project("+proj=aea +lat_0=49.0601837 +lon_0=17.7539063 +lat_1=37.0553505 +lat_2=61.0650168 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs") %>% 
+  terra::resample(Naidoo)
+H <- ggplot() + 
+   geom_spatraster(data = HFP) +
+  theme_bw() +
+   scale_fill_hypso_c() + ggtitle("Footprint") +theme(legend.position = "bottom")
 
-Humans <- raster::stack(HFP, Naidoo)
-names(Humans) <- c("Footprint", "Agriculture")
 ```
 
 * Copenhagen shows how different they are
 
 ```{r}
-plot(Humans, colNA = "black")
+H + N
 ```
 
 # Prioritization
@@ -135,14 +273,50 @@ plot(Humans, colNA = "black")
 * Only take into account species (10% coverage)
 
 ```{r}
-Results <- readRDS("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Sols.rds")
+Results <- readRDS("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Sols.rds") %>% terra::rast()
+
+cls <- data.frame(id=0:1, 
+                  Flat_Cost=c("non-selected", "Selected"))
+
+levels(Results[[1]]) <- cls
+
+cls <- data.frame(id=0:1, 
+                  Agricultural_Cost=c("non-selected", "Selected"))
+
+levels(Results[[2]]) <- cls
+
+cls <- data.frame(id=0:1, 
+                  Add_PAs=c("non-selected", "Selected"))
+
+levels(Results[[3]]) <- cls
+
+cls <- data.frame(id=0:1, 
+                  Exclude_Urban=c("non-selected", "Selected"))
+
+levels(Results[[4]]) <- cls
 ```
 
 ```{r firstResults}
-Flat <- raster::stack(ConcensuRichness, Results[[1]])
-names(Flat) <- c("Richness", "Selected")
+p1 <- ggplot() +
+  geom_spatraster(data = Results[[1]]) +
+  scale_fill_viridis_d(na.translate = F) +
+  theme_bw() +
+  ggtitle("Flat results")
 
-plot(Flat, colNA = "black")
+p2 <- ggplot() +
+  geom_spatraster(data = ConcensuRichness) +
+  scale_fill_hypso_c() +
+  theme_bw() +
+  ggtitle("Richness")
+
+p1 / p2
+
+```
+
+## Naive (cont)
+
+```{r}
+p1
 ```
 
 ## Add Agriculture
@@ -150,10 +324,25 @@ plot(Flat, colNA = "black")
 * Add Agriculture as cost (min cost)
 
 ```{r AgroResults}
-Agro <- raster::stack(Naidoo, Results[[2]])
-names(Agro) <- c("Agriculture", "Selected")
+p1 <- ggplot() +
+  geom_spatraster(data = Results[[2]]) +
+  scale_fill_viridis_d(na.translate = F) +
+  theme_bw() +
+  ggtitle("Results")
 
-plot(Agro, colNA = "black")
+p2 <- ggplot() +
+  geom_spatraster(data = Naidoo) +
+  scale_fill_hypso_c() +
+  theme_bw() +
+  ggtitle("Agriculture")
+
+p1 / p2
+```
+
+## Add agriculture (cont)
+
+```{r}
+p1
 ```
 
 ## We dont start from scratch
@@ -161,16 +350,33 @@ plot(Agro, colNA = "black")
 * Start with protected areas, eliminate cities (HFP)
 
 ```{r HFPResults}
-Priors <- raster::stack(HFP, Results[[4]])
-names(Priors) <- c("Priors", "Selected")
+p1 <- ggplot() +
+  geom_spatraster(data = Results[[4]]) +
+  scale_fill_viridis_d(na.translate = F) +
+  theme_bw() +
+  ggtitle("Results")
 
-plot(Priors, colNA = "black")
+p2 <- ggplot() +
+  geom_spatraster(data = HFP) +
+  scale_fill_hypso_c() +
+  theme_bw() +
+  ggtitle("Priors")
+
+p1 / p2
 ```
+
+
+## We dont start from scratch (cont)
+
+```{r}
+p1
+```
+
 
 
 ## Using weights and different budgets
 
-```{r}
+```{r, cache = F}
 knitr::include_graphics("animation.gif")
 ```
 
@@ -178,20 +384,14 @@ knitr::include_graphics("animation.gif")
 
 ```{r}
 DF <- read_csv("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/Sols.csv")
-Temp13 <- raster(paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/MaxUtilitySols/Solution_", DF$Budget[3], ".tif"))
+Temp13 <- terra::rast(paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/MaxUtilitySols/Solution_", DF$Budget[3], ".tif"))
 
-Temp21 <- raster(paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/MaxUtilitySols/Solution_", DF$Budget[5], ".tif"))
+Temp21 <- terra::rast(paste0("O:/Nat_Ecoinformatics/C_Write/_User/DerekCorcoran_au687614/Prioritization/MaxUtilitySols/Solution_", DF$Budget[5], ".tif"))
 
-Temp <- stack(Temp13, Temp21)
+Temp <- c(Temp13, Temp21)
 
 names(Temp) <- c("Protected_13", "Protected_21")
 plot(Temp, colNA = "black")
 ```
 
-# Other things to add
-
-## Prioritization doesn't have to be about species
-
-* Add ecosystem services as features to be preserved
-* Add other needs as cosntrains (Carbon stock among others)
-
+# Thanks

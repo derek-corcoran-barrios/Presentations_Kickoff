@@ -1,0 +1,11 @@
+name: Publish Document
+title:
+username:
+account: rpubs
+server: rpubs.com
+hostUrl: rpubs.com
+appId: https://api.rpubs.com/api/v1/document/962389/c9bd355e2b4d4df48d4cabed2e895a16
+bundleId: https://api.rpubs.com/api/v1/document/962389/c9bd355e2b4d4df48d4cabed2e895a16
+url: http://rpubs.com/derek_corcoran/962389
+when: 1666841242.6788
+lastSyncTime: 1666841242.67881
