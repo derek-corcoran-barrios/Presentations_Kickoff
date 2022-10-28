@@ -24,13 +24,12 @@ Resolve1 <- list()
 for(i in 1:nrow(Data1)){
   try({
     Resolve1[[i]] <- taxize::gnr_resolve(Data1$videnskabeligt_navn[i],
-                                         data_source_ids = "11", canonical = TRUE, best_match_only = T) %>%
-      rename(Name = user_supplied_name)
+                                         data_source_ids = "11", canonical = TRUE, best_match_only = T)
     if((i %% 500) == 0){
       saveRDS(Resolve1, "Resolve1.rds")
     }
     if((i %% 100) == 0){
-      message(paste(i, "of", nrow(Data1), "Ready!"))
+      print(paste(i, "of", nrow(Data1), "Ready!", Sys.time()))
     }
     gc()
   })
@@ -44,5 +43,9 @@ Resolve1 <- Resolve1 %>% purrr::reduce(bind_rows)
 
 DF1 <- rgbif::name_backbone_checklist(Resolve1$matched_name2) #Lookup names in the GBIF backbone taxonomy in a checklist.
 # It gives you the code for the species name from the GBIF database and additional information such as whether the name is a real species or a synonym
+
+
+
+DF1 <- DF1 %>% distinct()
 
 saveRDS(DF1, "DF1.rds")
